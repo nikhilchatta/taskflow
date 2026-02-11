@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(c:UsersADMINtaskflowbackendvenvScriptspython.exe -m uvicorn --version)"
+    ]
+  }
+}
