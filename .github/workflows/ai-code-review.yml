@@ -45,22 +45,23 @@ jobs:
           PORT: 5001
 
       - name: Run Code Review with Quality Gate
+        working-directory: /tmp/ai-reviewer
         run: |
-          # Get changed files in PR
-          CHANGED_FILES=$(git diff --name-only origin/main...HEAD | grep -E '\.(py|js|jsx|css)$' || true)
+          # Get changed files in PR (absolute paths)
+          CHANGED_FILES=$(git -C $GITHUB_WORKSPACE diff --name-only origin/main...HEAD | grep -E '\.(py|js|jsx|css)$' | sed "s|^|$GITHUB_WORKSPACE/|" || true)
 
           if [ -z "$CHANGED_FILES" ]; then
             echo "No code files changed"
             exit 0
           fi
 
-          # Run review with threshold and fail conditions
-          /tmp/ai-reviewer/node_modules/.bin/tsx /tmp/ai-reviewer/scripts/ci-review.ts \
+          # Run review using the project's own npm script
+          npx tsx scripts/ci-review.ts \
             --threshold 75 \
             --fail-on-critical \
             --fail-on-high \
             --format sarif \
-            --output code-review-results.sarif \
+            --output $GITHUB_WORKSPACE/code-review-results.sarif \
             $CHANGED_FILES
         env:
           CODE_REVIEW_API_URL: http://localhost:5001/api
@@ -70,7 +71,7 @@ jobs:
         if: always() && hashFiles('code-review-results.sarif') != ''
         uses: github/codeql-action/upload-sarif@v3
         with:
-          sarif_file: code-review-results.sarif
+          sarif_file: ${{ github.workspace }}/code-review-results.sarif
 
       - name: Comment on PR
         if: github.event_name == 'pull_request' && hashFiles('code-review-results.sarif') != ''
@@ -78,4 +79,4 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const results = JSON.parse(fs.readFileSync('code-review-results.sarif'));
+            const results = JSON.parse(fs.readFileSync('${{ github.workspace }}/code-review-results.sarif'));
