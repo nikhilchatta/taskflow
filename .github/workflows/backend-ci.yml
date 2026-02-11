@@ -38,3 +38,5 @@ jobs:
       - name: Import check
         working-directory: backend
         run: python -c "from main import app; print('App loaded OK')"
+
+        #comments to push to trigger the workflow
