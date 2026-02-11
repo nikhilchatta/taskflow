@@ -33,9 +33,7 @@ jobs:
 
       - name: Install reviewer dependencies
         working-directory: /tmp/ai-reviewer
-        run: |
-          npm install
-          npm install -g typescript tsx
+        run: npm install
 
       - name: Start Code Review Server
         working-directory: /tmp/ai-reviewer
@@ -57,7 +55,7 @@ jobs:
           fi
 
           # Run review with threshold and fail conditions
-          npx tsx /tmp/ai-reviewer/scripts/ci-review.ts \
+          /tmp/ai-reviewer/node_modules/.bin/tsx /tmp/ai-reviewer/scripts/ci-review.ts \
             --threshold 75 \
             --fail-on-critical \
             --fail-on-high \
