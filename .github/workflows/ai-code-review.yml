@@ -1,82 +1,97 @@
-name: AI Code Review
+name: Code Quality Gate
 
 on:
   pull_request:
-    branches: [main]
     types: [opened, synchronize, reopened]
-    paths:
-      - '**.py'
-      - '**.js'
-      - '**.jsx'
-      - '**.css'
-  push:
-    branches: [main]
 
 jobs:
-  code-review:
-    if: github.event.pull_request.draft == false || github.event_name == 'push'
+  quality-check:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout taskflow code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v3
         with:
           fetch-depth: 0
-
+      
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v3
         with:
-          node-version: '20'
-
-      - name: Clone AI-CodeReview-Assistant
-        run: git clone https://github.com/nikhilchatta/AI-CodeReview-Assistant.git /tmp/ai-reviewer
-
-      - name: Install reviewer dependencies
-        working-directory: /tmp/ai-reviewer
-        run: npm install
-
-      - name: Start Code Review Server
-        working-directory: /tmp/ai-reviewer
+          node-version: '18'
+      
+      - name: Setup Review Tool
         run: |
+          npm install -g typescript tsx
+          npm install @anthropic-ai/sdk glob dotenv express cors
+          git clone https://github.com/your-org/AI-CodeReview-Assistant.git review-tool
+          cd review-tool && npm install
+      
+      - name: Start Review Server
+        run: |
+          cd review-tool
           npm run server &
           sleep 10
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          PORT: 5001
-
-      - name: Run Code Review with Quality Gate
-        working-directory: /tmp/ai-reviewer
+      
+      - name: Run Quality Gate
+        id: review
         run: |
-          # Get changed files in PR (absolute paths)
-          CHANGED_FILES=$(git -C $GITHUB_WORKSPACE diff --name-only origin/main...HEAD | grep -E '\.(py|js|jsx|css)$' | sed "s|^|$GITHUB_WORKSPACE/|" || true)
-
-          if [ -z "$CHANGED_FILES" ]; then
-            echo "No code files changed"
-            exit 0
-          fi
-
-          # Run review using the project's own npm script
-          npx tsx scripts/ci-review.ts \
-            --threshold 75 \
-            --fail-on-critical \
-            --fail-on-high \
-            --format sarif \
-            --output $GITHUB_WORKSPACE/code-review-results.sarif \
-            $CHANGED_FILES
+          cd review-tool
+          git diff --name-only origin/${{ github.base_ref }}...HEAD | \
+            grep -E '\.(py|scala|sql|tf)$' | \
+            xargs npx tsx scripts/ci-review.ts \
+              --threshold 75 \
+              --fail-on-critical \
+              --format json \
+              --output ../review-results.json
         env:
           CODE_REVIEW_API_URL: http://localhost:5001/api
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-
-      - name: Upload SARIF results
-        if: always() && hashFiles('code-review-results.sarif') != ''
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: ${{ github.workspace }}/code-review-results.sarif
-
-      - name: Comment on PR
-        if: github.event_name == 'pull_request' && hashFiles('code-review-results.sarif') != ''
-        uses: actions/github-script@v7
+      
+      - name: Comment Results on PR
+        if: always()
+        uses: actions/github-script@v6
         with:
           script: |
             const fs = require('fs');
-            const results = JSON.parse(fs.readFileSync('${{ github.workspace }}/code-review-results.sarif'));
+            const results = JSON.parse(fs.readFileSync('review-results.json', 'utf8'));
+            const summary = results.summary;
+            
+            const status = summary.passThreshold ? '✅ PASSED' : '❌ FAILED';
+            const comment = `## Code Quality Review ${status}
+            
+            **Score:** ${summary.averageScore}/100
+            **Threshold:** 75/100
+            
+            ### Issues Found
+            - 🔴 Critical: ${summary.criticalCount}
+            - 🟠 High: ${summary.highCount}
+            - 🟡 Medium: ${summary.mediumCount}
+            - 🟢 Low: ${summary.lowCount}
+            
+            ${summary.passThreshold ? '✅ Quality gate passed! Ready to merge.' : '❌ Quality gate failed. Please address the issues above.'}`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+# Then in your main workflow, keep it simple:
+# .github/workflows/main.yml
+name: CI/CD
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Deploy
+        run: ./deploy.sh
+
+# Enable branch protection:
+# Settings → Branches → Add rule for 'main'
+# ✓ Require status checks: "Code Quality Gate / quality-check"
